@@ -20,6 +20,7 @@ Private Sub Btn_Upsert_Click()
     Unload Me
 End Sub
 
+'Gets list of columns from user selected table to display in ListBox'
 Private Sub ComboBox_OldTable_Change()
     ListBox_MatchColumns.Clear
     
