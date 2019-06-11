@@ -119,7 +119,7 @@ Private Function Upsert(toUpsertTable_ As ListObject, upserterTable_ As ListObje
             Call updateRow(toUpsertTable_, upserterTable_, result, rcount)
         Else
             Rem MsgBox "Is NOT an update row: " & upserterTable.ListRows(rcount).Range.Address
-        
+            Call insertRow(toUpsertTable_, upserterTable_, rcount)
         End If
     Next rcount
     
@@ -174,17 +174,30 @@ End Function
     
 Private Function updateRow(toUpsertTable_ As ListObject, upserterTable_ As ListObject, toUpT_rownum As Integer, upsert_rownum As Integer) As Integer
 
-        Dim toUpTbl_cell As Range
-        Dim upsertTbl_cell As Range
-        
-        Dim colnameVar As Variant
-        For Each colnameVar In upserterTable_.ListColumns
-            Dim colname As String: colname = CStr(colnameVar)
-            Set toUpTbl_cell = toUpsertTable_.DataBodyRange.Cells(toUpT_rownum, toUpsertTable_.ListColumns(colname).Index)
-            Set upsertTbl_cell = upserterTable_.DataBodyRange.Cells(upsert_rownum, upserterTable_.ListColumns(colname).Index)
-            Rem MsgBox "toUpTbl_cell address: " & toUpTbl_cell.Address & "; upsertTbl_cell: " & upsertTbl_cell.Address
-            Rem MsgBox "Replace toUpTbl_cell: " & toUpTbl_cell.Value & " with: " & upsertTbl_cell.Value
-            toUpTbl_cell.Value = upsertTbl_cell.Value
-        Next colnameVar
+    Dim toUpTbl_cell As Range
+    Dim upsertTbl_cell As Range
+    
+    Dim colnameVar As Variant
+    For Each colnameVar In upserterTable_.ListColumns
+        Dim colname As String: colname = CStr(colnameVar)
+        Set toUpTbl_cell = toUpsertTable_.DataBodyRange.Cells(toUpT_rownum, toUpsertTable_.ListColumns(colname).Index)
+        Set upsertTbl_cell = upserterTable_.DataBodyRange.Cells(upsert_rownum, upserterTable_.ListColumns(colname).Index)
+        Rem MsgBox "toUpTbl_cell address: " & toUpTbl_cell.Address & "; upsertTbl_cell: " & upsertTbl_cell.Address
+        Rem MsgBox "Replace toUpTbl_cell: " & toUpTbl_cell.Value & " with: " & upsertTbl_cell.Value
+        toUpTbl_cell.Value = upsertTbl_cell.Value
+    Next colnameVar
         
 End Function
+
+Private Function insertRow(toUpsertTable_ As ListObject, upserterTable_ As ListObject, upsert_rownum As Integer) As Integer
+
+    Dim newRow As Range: Set newRow = toUpsertTable_.ListRows.Add.Range
+    Dim colnameVar As Variant
+    For Each colnameVar In upserterTable_.ListColumns
+        Dim colname As String: colname = CStr(colnameVar)
+        Dim newRow_cell As Range: Set newRow_cell = toUpsertTable_.Range.Cells(newRow.row, toUpsertTable_.ListColumns(colname).Index)
+        newRow_cell.Value = upserterTable_.DataBodyRange.Cells(upsert_rownum, upserterTable_.ListColumns(colname).Index).Value
+    Next colnameVar
+End Function
+
+
