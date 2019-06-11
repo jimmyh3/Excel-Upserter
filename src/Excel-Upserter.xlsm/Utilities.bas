@@ -14,3 +14,7 @@ Function GetTableByName(tableName As String) As ListObject
     Next sheet
     
 End Function
+
+Public Function GetArrayLen(arr As Variant) As Integer
+    GetArrayLen = UBound(arr) - LBound(arr) + 1
+End Function
