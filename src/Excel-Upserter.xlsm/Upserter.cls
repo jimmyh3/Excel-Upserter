@@ -11,10 +11,11 @@ Option Explicit
 
 Dim toUpsertTable As ListObject
 Dim upserterTable As ListObject 'Updated Table'
-Dim resTable As ListObject
+Dim result_dataBodyArray() As Variant
 Dim keyCols() As String
 
 Public Function Run(oldTbl As String, updTbl As String, keyColumns() As String)
+    Application.ScreenUpdating = False
     Dim newWS As Worksheet
     Set newWS = Sheets.Add
     Set toUpsertTable = GetTableByName(oldTbl)
@@ -24,9 +25,14 @@ Public Function Run(oldTbl As String, updTbl As String, keyColumns() As String)
     Call toUpsertTable.Range.Copy(Destination:=newWS.Range("A1"))
     Set toUpsertTable = newWS.ListObjects(1)
     
-    If IsInputValid(toUpsertTable, upserterTable) Then
-        Call addMissingColsTotoUpsertTable(toUpsertTable, upserterTable)
+    If hasKeyColumns(upserterTable) Then
+        Call addMissingTableColumns(toUpsertTable, upserterTable)
+        result_dataBodyArray = toUpsertTable.DataBodyRange.Value
         Call Upsert(toUpsertTable, upserterTable)
+        
+        'Resize table to accomodate resulting array otherwise it's truncated'
+        toUpsertTable.Resize toUpsertTable.Range.Resize(UBound(result_dataBodyArray, 1) + 1, UBound(result_dataBodyArray, 2))
+        toUpsertTable.DataBodyRange.Value = result_dataBodyArray
     Else
         Application.DisplayAlerts = False
         newWS.ListObjects(1).Delete
@@ -34,13 +40,10 @@ Public Function Run(oldTbl As String, updTbl As String, keyColumns() As String)
         Application.DisplayAlerts = True
     End If
     
+    Application.ScreenUpdating = True
 End Function
 
-Private Function IsInputValid(toUpsertTable_ As ListObject, upserterTable_ As ListObject) As Boolean
-    IsInputValid = hasKeyColumns(upserterTable_)
-End Function
-
-Private Function hasKeyColumns(upserterTable_ As ListObject) As Boolean
+Private Function hasKeyColumns(table_updater As ListObject) As Boolean
     Dim mcol As Variant
     Dim uidx As Integer
     Dim isEmptyArr As Boolean
@@ -59,15 +62,15 @@ Private Function hasKeyColumns(upserterTable_ As ListObject) As Boolean
         
     For Each mcol In keyCols
         hasNeededCols = False
-        For uidx = 1 To upserterTable_.HeaderRowRange.Count
-            If mcol = upserterTable_.HeaderRowRange(uidx) Then
+        For uidx = 1 To table_updater.HeaderRowRange.Count
+            If mcol = table_updater.HeaderRowRange(uidx) Then
                 hasNeededCols = True
                 Exit For
             End If
         Next uidx
         
         If hasNeededCols = False Then
-            MsgBox "Error: 2nd Table needs to have the selected key columns."
+            MsgBox "Error: 2nd table_updater needs to have the selected key columns."
             hasKeyColumns = False
             Exit Function
         End If
@@ -78,13 +81,13 @@ Private Function hasKeyColumns(upserterTable_ As ListObject) As Boolean
     
 End Function
 
-Private Sub addMissingColsTotoUpsertTable(toUpsertTable_ As ListObject, upserterTable_ As ListObject)
+Private Sub addMissingTableColumns(table_result As ListObject, table_toReference As ListObject)
     Dim hasCol As Boolean, uidx As Integer, oldCol As Variant
-    For uidx = 1 To upserterTable_.ListColumns.Count
+    For uidx = 1 To table_toReference.ListColumns.Count
         hasCol = False
         
-        For Each oldCol In toUpsertTable_.ListColumns
-            If upserterTable_.ListColumns(uidx) = oldCol Then
+        For Each oldCol In table_result.ListColumns
+            If table_toReference.ListColumns(uidx) = oldCol Then
                 hasCol = True
                 Exit For
             End If
@@ -92,69 +95,60 @@ Private Sub addMissingColsTotoUpsertTable(toUpsertTable_ As ListObject, upserter
         
         If hasCol = False Then
             Dim addIdx As Integer
-            addIdx = toUpsertTable_.ListColumns.Count + 1
-            toUpsertTable_.ListColumns.Add (addIdx)
-            toUpsertTable_.ListColumns(addIdx).Name = upserterTable_.ListColumns(uidx)
+            addIdx = table_result.ListColumns.Count + 1
+            table_result.ListColumns.Add (addIdx)
+            table_result.ListColumns(addIdx).Name = table_toReference.ListColumns(uidx)
         End If
     Next uidx
 End Sub
 
 Rem Output result into new sheet (do not replace the original selections
-Private Function Upsert(toUpsertTable_ As ListObject, upserterTable_ As ListObject) As Range
+Private Function Upsert(table_toUpdate As ListObject, table_updater As ListObject) As Range
 
     'Thinking too long on this; just write what you wish it can do..'
     '1. Loop through every row of upserterTable'
     '2. For each upserterTable row, by cell, find first instance of toUpsertTable value that matches'
     '3. Create Inner loop for #2. to then find subsequent key column values by matching column names'
-    Dim ccount As Integer
     Dim rcount As Integer
-    ccount = upserterTable.DataBodyRange.Columns.Count
     
     'Iterate each row in upserterTable'
-    For rcount = 1 To upserterTable.DataBodyRange.Rows.Count
+    For rcount = 1 To table_updater.DataBodyRange.Rows.Count
         'Check if current row should be updated or inserted'
-        Dim result As Integer: result = isUpdateRow(toUpsertTable_, upserterTable_, rcount)
+        Dim result As Integer: result = isUpdateRow(table_toUpdate, table_updater, rcount)
         If result > 0 Then
-            Rem MsgBox "Is update row: " & upserterTable.ListRows(rcount).Range.Address & " for toUpdateTable at " & toUpsertTable_.ListRows(result).Range.Address
-            Call updateRow(toUpsertTable_, upserterTable_, result, rcount)
+            Call updateRow(table_toUpdate, table_updater, result, rcount)
         Else
-            Rem MsgBox "Is NOT an update row: " & upserterTable.ListRows(rcount).Range.Address
-            Call insertRow(toUpsertTable_, upserterTable_, rcount)
+            Call insertRow(table_toUpdate, table_updater, rcount)
         End If
     Next rcount
     
 End Function
 
-Private Function isUpdateRow(toUpsertTable_ As ListObject, upserterTable_ As ListObject, rcount As Integer) As Long
+Private Function isUpdateRow(table_toUpdate As ListObject, table_updater As ListObject, rcount As Integer) As Long
     Dim isUpdate As Boolean: isUpdate = True
     'keyCell = cell in upserterTable that acts as initial value to find in cross referencing'
-    Dim keyCell As Range: Set keyCell = upserterTable_.DataBodyRange.Cells(rcount, upserterTable.ListColumns(keyCols(0)).Index)
+    Dim keyCell As Range: Set keyCell = table_updater.DataBodyRange.Cells(rcount, upserterTable.ListColumns(keyCols(0)).Index)
     'colToFindIn = column in toUpsertTable to find the keyCell value in'
-    Dim colToFindIn As Range: Set colToFindIn = toUpsertTable_.ListColumns(keyCols(0)).Range
+    Dim colToFindIn As Range: Set colToFindIn = table_toUpdate.ListColumns(keyCols(0)).Range
     'firstFind = 1st cell in toUpsertTable under the same column name as keyCell [over at upserterTable] with the same value'
     Dim firstFind As Range: Set firstFind = colToFindIn.Find(keyCell.Value, LookIn:=xlValues)
     'loopFind is needed to continue Range.FindNext; firstFind is kept to ensure we don't continue searching forever'
     Dim loopFind As Range: Set loopFind = firstFind
     Dim result As Integer: result = -1
-        
+    
     If Not firstFind Is Nothing Then
-        Rem MsgBox "KeyCell: " & keyCell & "; Found match in toUpsertTable at: " & firstFind.Address & " as " & firstFind.Value
-        
         Do
             Dim hasAllKeyMatches As Boolean: hasAllKeyMatches = True
             Dim keyColIdx As Integer
             For keyColIdx = 1 To UBound(keyCols)
-                Dim upsert_col As Integer: upsert_col = upserterTable_.ListColumns(keyCols(keyColIdx)).Index
-                Dim upsert_row As Integer: upsert_row = rcount
-                Rem MsgBox "upsert_col: " & upsert_col & "; upsert_row: " & upsert_row
-                Dim upsert_cell As Range: Set upsert_cell = upserterTable_.DataBodyRange.Cells(upsert_row, upsert_col)
-                Dim toUpT_colnum As Integer: toUpT_colnum = toUpsertTable_.ListColumns(keyCols(keyColIdx)).Index
-                Dim toUpT_rownum As Integer: toUpT_rownum = loopFind.row
-                Rem MsgBox "toUpT_colnum: " & toUpT_colnum & " toUpT_rownum: " & toUpT_rownum
-                Dim toUpT_cell As Range: Set toUpT_cell = toUpsertTable_.Range.Cells(toUpT_rownum, toUpT_colnum)
-                Rem MsgBox "upsert_cell: " & upsert_cell.Value & " " & upsert_cell.Address & " ; toUpt_cell: " & toUpT_cell.Value & " " & toUpT_cell.Address
+                Dim updater_colnum As Integer: updater_colnum = table_updater.ListColumns(keyCols(keyColIdx)).Index
+                Dim updater_rownum As Integer: updater_rownum = rcount
+                Dim updater_cell As Range: Set updater_cell = table_updater.DataBodyRange.Cells(updater_rownum, updater_colnum)
+                Dim toUpdate_colnum As Integer: toUpdate_colnum = table_toUpdate.ListColumns(keyCols(keyColIdx)).Index
+                Dim toUpdate_rownum As Integer: toUpdate_rownum = loopFind.row
+                Dim toUpdate_cell As Range: Set toUpdate_cell = table_toUpdate.Range.Cells(toUpdate_rownum, toUpdate_colnum)
                 
-                If toUpT_cell.Value <> upsert_cell.Value Then
+                If toUpdate_cell.Value <> updater_cell.Value Then
                     hasAllKeyMatches = False
                     Exit For
                 End If
@@ -168,35 +162,34 @@ Private Function isUpdateRow(toUpsertTable_ As ListObject, upserterTable_ As Lis
             
             Set loopFind = colToFindIn.FindNext(loopFind)
         Loop While Not loopFind Is Nothing And firstFind.Address <> loopFind.Address
+    Else
+        'Debug.Print "Cannot find initial key cell: " & keyCell.Value & "; colToFind is: " & colToFindIn.Address
     End If
+    
     
 End Function
     
-Private Function updateRow(toUpsertTable_ As ListObject, upserterTable_ As ListObject, toUpT_rownum As Integer, upsert_rownum As Integer) As Integer
+Private Function updateRow(table_toUpdate As ListObject, table_updater As ListObject, toUpdate_rownum As Integer, updater_rownum As Integer) As Integer
 
-    Dim toUpTbl_cell As Range
-    Dim upsertTbl_cell As Range
+    Dim toUpdate_cell As Range
+    Dim updater_cell As Range
     
     Dim colnameVar As Variant
-    For Each colnameVar In upserterTable_.ListColumns
+    For Each colnameVar In table_updater.ListColumns
         Dim colname As String: colname = CStr(colnameVar)
-        Set toUpTbl_cell = toUpsertTable_.DataBodyRange.Cells(toUpT_rownum, toUpsertTable_.ListColumns(colname).Index)
-        Set upsertTbl_cell = upserterTable_.DataBodyRange.Cells(upsert_rownum, upserterTable_.ListColumns(colname).Index)
-        Rem MsgBox "toUpTbl_cell address: " & toUpTbl_cell.Address & "; upsertTbl_cell: " & upsertTbl_cell.Address
-        Rem MsgBox "Replace toUpTbl_cell: " & toUpTbl_cell.Value & " with: " & upsertTbl_cell.Value
-        toUpTbl_cell.Value = upsertTbl_cell.Value
+        Set updater_cell = table_updater.DataBodyRange.Cells(updater_rownum, table_updater.ListColumns(colname).Index)
+        result_dataBodyArray(toUpdate_rownum, table_toUpdate.ListColumns(colname).Index) = updater_cell.Value
     Next colnameVar
         
 End Function
 
-Private Function insertRow(toUpsertTable_ As ListObject, upserterTable_ As ListObject, upsert_rownum As Integer) As Integer
-
-    Dim newRow As Range: Set newRow = toUpsertTable_.ListRows.Add.Range
+Private Function insertRow(table_toUpdate As ListObject, table_updater As ListObject, updater_rownum As Integer) As Integer
+    result_dataBodyArray = Resize2DArray(result_dataBodyArray, UBound(result_dataBodyArray, 1) + 1, UBound(result_dataBodyArray, 2))
+        
     Dim colnameVar As Variant
-    For Each colnameVar In upserterTable_.ListColumns
+    For Each colnameVar In table_updater.ListColumns
         Dim colname As String: colname = CStr(colnameVar)
-        Dim newRow_cell As Range: Set newRow_cell = toUpsertTable_.Range.Cells(newRow.row, toUpsertTable_.ListColumns(colname).Index)
-        newRow_cell.Value = upserterTable_.DataBodyRange.Cells(upsert_rownum, upserterTable_.ListColumns(colname).Index).Value
+        result_dataBodyArray(UBound(result_dataBodyArray, 1), table_toUpdate.ListColumns(colname).Index) = table_updater.DataBodyRange.Cells(updater_rownum, table_updater.ListColumns(colname).Index).Value
     Next colnameVar
 End Function
 
